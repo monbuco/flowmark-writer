@@ -1,8 +1,9 @@
-import { EditorState } from "prosemirror-state";
+import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { toggleMark, setBlockType, lift } from "prosemirror-commands";
 import { undo, redo } from "prosemirror-history";
 import { wrapInList } from "prosemirror-schema-list";
+import { Fragment } from "prosemirror-model";
 import {
   addRowBefore,
   addRowAfter,
@@ -16,17 +17,101 @@ import { schema } from "./schema";
 // Text formatting commands
 export function toggleBold(view: EditorView) {
   const { state, dispatch } = view;
-  return toggleMark(schema.marks.strong)(state, dispatch);
+  if (!schema.marks.strong) {
+    console.warn("Strong mark not available in schema");
+    return false;
+  }
+  const command = toggleMark(schema.marks.strong);
+  const result = command(state, dispatch);
+  if (result) {
+    view.focus();
+  }
+  return result;
 }
 
 export function toggleItalic(view: EditorView) {
   const { state, dispatch } = view;
-  return toggleMark(schema.marks.em)(state, dispatch);
+  if (!schema.marks.em) {
+    console.warn("Em mark not available in schema");
+    return false;
+  }
+  const command = toggleMark(schema.marks.em);
+  const result = command(state, dispatch);
+  if (result) {
+    view.focus();
+  }
+  return result;
 }
 
 export function toggleCode(view: EditorView) {
   const { state, dispatch } = view;
-  return toggleMark(schema.marks.code)(state, dispatch);
+  if (!schema.marks.code) {
+    console.warn("Code mark not available in schema");
+    return false;
+  }
+  const command = toggleMark(schema.marks.code);
+  const result = command(state, dispatch);
+  if (result) {
+    view.focus();
+  }
+  return result;
+}
+
+// Insert code block (like ``` in markdown)
+export function insertCodeBlock(view: EditorView) {
+  const { state, dispatch } = view;
+  if (!schema.nodes.code_block) {
+    console.warn("Code block node not available in schema");
+    return false;
+  }
+  
+  const { $from } = state.selection;
+  const { from, to } = state.selection;
+  
+  // Check if we're in a paragraph
+  const paragraphNode = $from.node($from.depth);
+  if (paragraphNode.type === schema.nodes.paragraph) {
+    const paragraphStart = $from.before($from.depth);
+    const paragraphEnd = $from.after($from.depth);
+    
+    // Create code block
+    const codeBlock = schema.nodes.code_block.create({});
+    const newParagraph = schema.nodes.paragraph.create();
+    const fragment = Fragment.fromArray([codeBlock, newParagraph]);
+    const tr = state.tr.replaceWith(paragraphStart, paragraphEnd, fragment);
+    const updatedDoc = tr.doc;
+    const codeBlockNode = updatedDoc.nodeAt(paragraphStart);
+    
+    if (codeBlockNode && codeBlockNode.type === schema.nodes.code_block) {
+      // Position cursor INSIDE the code block
+      const codeBlockPos = paragraphStart;
+      const insidePos = codeBlockPos + 1;
+      tr.setSelection(TextSelection.create(updatedDoc, insidePos));
+    }
+    
+    if (dispatch) {
+      dispatch(tr);
+      view.focus();
+    }
+    return true;
+  }
+  
+  // If not in a paragraph, try to insert code block at current position
+  const codeBlock = schema.nodes.code_block.create({});
+  const tr = state.tr.replaceWith(from, to, codeBlock);
+  const updatedDoc = tr.doc;
+  const codeBlockNode = updatedDoc.nodeAt(from);
+  
+  if (codeBlockNode && codeBlockNode.type === schema.nodes.code_block) {
+    const insidePos = from + 1;
+    tr.setSelection(TextSelection.create(updatedDoc, insidePos));
+  }
+  
+  if (dispatch) {
+    dispatch(tr);
+    view.focus();
+  }
+  return true;
 }
 
 // Block structure commands
@@ -294,7 +379,7 @@ export function deleteTableCommand(view: EditorView) {
   const tr = state.tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, paragraph);
   
   // Set cursor at the start of the new paragraph
-  tr.setSelection(state.selection.constructor.near(tr.doc.resolve(tablePos + 1)));
+  tr.setSelection(TextSelection.near(tr.doc.resolve(tablePos + 1)));
   
   if (dispatch) {
     dispatch(tr);

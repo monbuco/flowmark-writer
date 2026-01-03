@@ -22,6 +22,7 @@
     toggleBold,
     toggleItalic,
     toggleCode,
+    insertCodeBlock,
     setParagraph,
     setHeading,
     toggleBulletList,
@@ -119,9 +120,11 @@
 
   function handleCommand(command: (view: EditorView) => boolean) {
     if (!view) return;
-    command(view);
-    view.focus();
-    forceUpdate();
+    const result = command(view);
+    if (result) {
+      view.focus();
+      forceUpdate();
+    }
   }
 
   function handleHeading(level: number) {
@@ -217,9 +220,9 @@
       </button>
       <button
         class="toolbar-button"
-          class:active={isMarkActive(editorState, schema.marks.code)}
-        onclick={() => handleCommand(toggleCode)}
-        title="Inline code"
+        class:active={isBlockActive(editorState, schema.nodes.code_block)}
+        onclick={() => handleCommand(insertCodeBlock)}
+        title="Code block"
       >
         <Code size={16} />
       </button>
@@ -285,14 +288,21 @@
 
 <style>
   .toolbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    z-index: 1000;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 4px;
     padding: 8px;
-    margin-bottom: 16px;
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
     background-color: #ffffff;
     flex-wrap: wrap;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
   }
 
   .toolbar-group {

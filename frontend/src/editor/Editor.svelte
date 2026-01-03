@@ -11,6 +11,7 @@
   
     import { schema } from "./schema";
     import { buildInputRules } from "./inputRules";
+    import { parseMarkdown } from "./clipboard/markdownParser";
     import Toolbar from "./Toolbar.svelte";
     import LinkEditor from "./LinkEditor.svelte";
     import TableMenu from "./TableMenu.svelte";
@@ -33,8 +34,14 @@
         
         // Custom keyboard shortcuts for bold, italic, undo, and redo
         const customKeymap = {
-          "Mod-b": toggleMark(schema.marks.strong),
-          "Mod-i": toggleMark(schema.marks.em),
+          "Mod-b": (state: EditorState, dispatch: any) => {
+            if (!schema.marks.strong) return false;
+            return toggleMark(schema.marks.strong)(state, dispatch);
+          },
+          "Mod-i": (state: EditorState, dispatch: any) => {
+            if (!schema.marks.em) return false;
+            return toggleMark(schema.marks.em)(state, dispatch);
+          },
           "Mod-z": undo,
           "Mod-y": redo,
           "Shift-Mod-z": redo,
@@ -42,10 +49,106 @@
           "Enter": (state: EditorState, dispatch: any) => {
             const { $from } = state.selection;
             
+            // First, check if we're inside a code block
+            let codeBlockPos = -1;
+            let codeBlockNode = null;
+            for (let d = $from.depth; d > 0; d--) {
+              const node = $from.node(d);
+              if (node.type === schema.nodes.code_block) {
+                codeBlockPos = $from.before(d);
+                codeBlockNode = node;
+                break;
+              }
+            }
+            
+            // If we're inside a code block, handle exit logic
+            if (codeBlockNode && codeBlockPos >= 0) {
+              const codeBlockStart = codeBlockPos;
+              const codeBlockEnd = codeBlockPos + codeBlockNode.nodeSize;
+              const cursorPos = $from.pos;
+              
+              // Calculate position relative to code block end
+              // The code block node structure: [nodeStart][content][nodeEnd]
+              // content area is from codeBlockStart+1 to codeBlockEnd-1
+              const contentStart = codeBlockStart + 1;
+              const contentEnd = codeBlockEnd - 1;
+              
+              // Check if cursor is at or near the end of the code block content
+              const distanceFromEnd = contentEnd - cursorPos;
+              const isNearEnd = distanceFromEnd <= 1; // At the end or very close
+              
+              // Get the text from cursor to end of code block
+              const textFromCursor = state.doc.textBetween(cursorPos, contentEnd);
+              const isEmptyAtEnd = !textFromCursor.trim();
+              
+              // If cursor is at/near the end and there's no text after cursor, exit code block
+              if (isNearEnd && isEmptyAtEnd) {
+                // Check if there's already a paragraph after the code block
+                const nextNode = state.doc.nodeAt(codeBlockEnd);
+                if (!nextNode || nextNode.type !== schema.nodes.paragraph) {
+                  // Create a new paragraph after the code block
+                  const paragraph = schema.nodes.paragraph.create();
+                  const tr = state.tr.insert(codeBlockEnd, paragraph);
+                  tr.setSelection(TextSelection.near(tr.doc.resolve(codeBlockEnd + 1)));
+                  if (dispatch) dispatch(tr);
+                  return true;
+                } else {
+                  // Move to the existing paragraph after the code block
+                  const tr = state.tr.setSelection(TextSelection.near(state.doc.resolve(codeBlockEnd + 1)));
+                  if (dispatch) dispatch(tr);
+                  return true;
+                }
+              }
+              
+              // If inside code block but not at end, allow normal newline (default behavior)
+              // Don't return true, let the default Enter behavior create a newline inside code block
+              return false;
+            }
+            
             // Check if current line is "---" and convert to horizontal rule
             const lineStart = $from.start($from.depth);
             const lineEnd = $from.end($from.depth);
             const lineText = state.doc.textBetween(lineStart, lineEnd).trim();
+            
+            // Check for fenced code block: ```language
+            const codeBlockMatch = lineText.match(/^```(\w*)$/);
+            if (codeBlockMatch) {
+              const paragraphNode = $from.node($from.depth);
+              if (paragraphNode.type === schema.nodes.paragraph) {
+                const language = codeBlockMatch[1] || null;
+                const paragraphStart = $from.before($from.depth);
+                const paragraphEnd = $from.after($from.depth);
+                
+                // Create code_block - create it empty, cursor will be positioned inside
+                const attrs: any = {};
+                if (language) {
+                  attrs.language = language;
+                }
+                // Create code block without initial content - user will type into it
+                const codeBlock = schema.nodes.code_block.create(attrs);
+                const newParagraph = schema.nodes.paragraph.create();
+                const fragment = Fragment.fromArray([codeBlock, newParagraph]);
+                const tr = state.tr.replaceWith(paragraphStart, paragraphEnd, fragment);
+                const updatedDoc = tr.doc;
+                const codeBlockNode = updatedDoc.nodeAt(paragraphStart);
+                if (codeBlockNode && codeBlockNode.type === schema.nodes.code_block) {
+                  // Position cursor INSIDE the code block
+                  // The code block node is at paragraphStart
+                  // We need to position at the start of the content area inside the code block
+                  // For a node with content: "text*", the content area starts at nodePos + 1
+                  const codeBlockPos = paragraphStart;
+                  // Resolve to inside the code block - this gives us a position where we can insert text
+                  const codeBlockResolved = updatedDoc.resolve(codeBlockPos);
+                  // Find the position inside the code block where text can be inserted
+                  // This is typically codeBlockPos + 1 (after the node start marker)
+                  const insidePos = codeBlockPos + 1;
+                  // Use TextSelection.create to position cursor at the start of the code block content
+                  tr.setSelection(TextSelection.create(updatedDoc, insidePos));
+                }
+                if (dispatch) dispatch(tr);
+                return true;
+              }
+            }
             
             if (lineText === "---" && schema.nodes.horizontal_rule) {
               // Find the paragraph node that contains "---"
@@ -153,7 +256,7 @@
           doc,
           schema,
           plugins: [
-            buildInputRules(schema),
+            buildInputRules(schema, { markdown: true, flowmark: false }),
             keymap(customKeymap),
             keymap(baseKeymap),
             history(),
@@ -183,6 +286,46 @@
                 // Trigger state update to show link editor
                 return false;
               }
+              return false;
+            },
+            paste: (view, event) => {
+              // IMPORTANT: Separation of concerns for performance
+              // - Input rules: Only for direct typing (handled by inputRules plugin)
+              // - Markdown parser: Only for paste operations (handled here)
+              // We prevent default paste behavior and manually insert parsed content
+              // to ensure input rules are NOT triggered during paste operations.
+              
+              const clipboardData = event.clipboardData;
+              if (!clipboardData) return false;
+
+              const text = clipboardData.getData('text/plain');
+              if (!text) return false;
+
+              // Check if the text looks like Markdown
+              const looksLikeMarkdown = /^[#*\-`\[\]>\d]/.test(text.trim()) || 
+                                       /\*\*.*\*\*|`.*`|\[.*\]\(.*\)/.test(text);
+
+              if (looksLikeMarkdown) {
+                // Prevent default paste behavior to bypass input rules
+                event.preventDefault();
+                
+                // Use the Markdown parser (NOT input rules) to convert markdown to ProseMirror nodes
+                const slice = parseMarkdown(text, schema);
+                if (slice) {
+                  const { state, dispatch } = view;
+                  const { from, to } = state.selection;
+                  
+                  // Directly insert the parsed slice using a manual transaction
+                  // This bypasses input rules because input rules only trigger on actual text input events,
+                  // not on programmatic transactions created via tr.replaceRange()
+                  const tr = state.tr.replaceRange(from, to, slice);
+                  dispatch(tr);
+                  return true; // Indicate we handled the paste
+                }
+              }
+
+              // For non-markdown content, let default paste behavior handle it
+              // This will insert plain text, which may trigger input rules for direct typing patterns
               return false;
             },
           },
@@ -220,8 +363,8 @@
   </script>
   
   <div class="editor-wrapper">
+    <Toolbar {view} />
     <div class="editor">
-      <Toolbar {view} />
       <div bind:this={editorEl} class="editor-container">
         {#if view}
           <LinkEditor {view} />
@@ -245,6 +388,7 @@
   min-height: 100vh;
   margin: 0 auto;
   padding: 96px 96px 96px 96px;
+  padding-top: 120px; /* Add extra padding at top to account for fixed toolbar */
   background-color: #ffffff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 }

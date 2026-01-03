@@ -1,12 +1,13 @@
 <script lang="ts">
   import { EditorView } from "prosemirror-view";
   import { EditorState } from "prosemirror-state";
+  import { Pencil, X } from "lucide-svelte";
   import { schema } from "./schema";
   import { getLinkUrl } from "./toolbar";
 
   let { view }: { view: EditorView | null } = $props();
   
-  let state: EditorState | null = $state(null);
+  let editorState: EditorState | null = $state(null);
 
   let linkUrl = $state("");
   let linkText = $state("");
@@ -15,14 +16,14 @@
   let showEditor = $state(false);
 
   function updateLinkInfo() {
-    if (!view || !state) {
+    if (!view || !editorState) {
       isVisible = false;
       return;
     }
 
-    const url = getLinkUrl(state);
+    const url = getLinkUrl(editorState);
     if (url) {
-      const { from } = state.selection;
+      const { from } = editorState.selection;
       linkUrl = url;
       
       // Get position of selection relative to editor container
@@ -97,18 +98,18 @@
   // Update state and link info when view changes
   $effect(() => {
     if (!view) {
-      state = null;
+      editorState = null;
       isVisible = false;
       return;
     }
 
-    state = view.state;
+    editorState = view.state;
     updateLinkInfo();
 
     // Set up event listeners to track state changes
     const handleUpdate = () => {
       if (view) {
-        state = view.state;
+        editorState = view.state;
         requestAnimationFrame(() => {
           updateLinkInfo();
         });
@@ -118,7 +119,7 @@
     const scheduleUpdate = () => {
       requestAnimationFrame(() => {
         if (view) {
-          state = view.state;
+          editorState = view.state;
           updateLinkInfo();
         }
       });
@@ -148,7 +149,7 @@
   }
 </script>
 
-{#if isVisible && view && state}
+{#if isVisible && view && editorState}
   <div
     class="link-editor"
     style="top: {position.top}px; left: {position.left}px;"
@@ -160,10 +161,10 @@
           {linkUrl}
         </a>
         <button class="link-edit-btn" onclick={handleEdit} title="Edit link">
-          ✏️
+          <Pencil size={14} />
         </button>
         <button class="link-remove-btn" onclick={handleRemove} title="Remove link">
-          ✕
+          <X size={14} />
         </button>
       </div>
     {:else}
@@ -211,7 +212,7 @@
 
   .link-url {
     flex: 1;
-    color: #0066cc;
+    color: #333;
     text-decoration: none;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -221,6 +222,7 @@
 
   .link-url:hover {
     text-decoration: underline;
+    color: #000;
   }
 
   .link-edit-btn,
@@ -232,6 +234,16 @@
     font-size: 14px;
     border-radius: 3px;
     transition: background-color 0.1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: currentColor;
+  }
+
+  .link-edit-btn :global(svg),
+  .link-remove-btn :global(svg) {
+    stroke: currentColor;
+    fill: none;
   }
 
   .link-edit-btn:hover,
@@ -255,8 +267,8 @@
 
   .link-input:focus {
     outline: none;
-    border-color: #0066cc;
-    box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.1);
+    border-color: #333;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
   }
 
   .link-actions {
@@ -277,13 +289,14 @@
   }
 
   .link-save-btn {
-    background: #0066cc;
+    background: #333;
     color: white;
-    border-color: #0066cc;
+    border-color: #333;
   }
 
   .link-save-btn:hover {
-    background: #0052a3;
+    background: #000;
+    border-color: #000;
   }
 
   .link-cancel-btn:hover {
@@ -297,7 +310,11 @@
     }
 
     .link-url {
-      color: #4a9eff;
+      color: #e0e0e0;
+    }
+
+    .link-url:hover {
+      color: #fff;
     }
 
     .link-input {
@@ -306,13 +323,20 @@
       color: #e0e0e0;
     }
 
+    .link-input:focus {
+      border-color: rgba(255, 255, 255, 0.4);
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+    }
+
     .link-save-btn {
-      background: #4a9eff;
-      border-color: #4a9eff;
+      background: #e0e0e0;
+      color: #1a1a1a;
+      border-color: #e0e0e0;
     }
 
     .link-save-btn:hover {
-      background: #3a8eef;
+      background: #fff;
+      border-color: #fff;
     }
 
     .link-cancel-btn {
