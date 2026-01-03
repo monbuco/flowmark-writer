@@ -17,6 +17,7 @@
     import LinkEditor from "./LinkEditor.svelte";
     import TableMenu from "./TableMenu.svelte";
     import InputDialog from "./InputDialog.svelte";
+    import NotePopover from "./NotePopover.svelte";
   
     let editorEl: HTMLDivElement;
     let view: EditorView | null = null;
@@ -557,6 +558,7 @@
           <LinkEditor {view} />
           <TableMenu {view} />
           <InputDialog />
+          <NotePopover {view} />
         {/if}
       </div>
     </div>
@@ -677,15 +679,16 @@
   line-height: 0;
   position: relative;
   top: -0.5em;
-  color: #0066cc;
+  color: #666;
   cursor: pointer;
   user-select: none;
   font-weight: 500;
+  transition: color 0.15s ease;
 }
 
 :global(.editor-container .ProseMirror sup.note-ref:hover) {
-  color: #0052a3;
-  text-decoration: underline;
+  color: #333;
+  text-decoration: none;
 }
 
 :global(.editor-container .ProseMirror div.note-content) {
@@ -748,6 +751,14 @@
   :global(.editor-container .ProseMirror) {
     color: #e0e0e0;
     background-color: #1a1a1a;
+  }
+  
+  :global(.editor-container .ProseMirror sup.note-ref) {
+    color: #999;
+  }
+  
+  :global(.editor-container .ProseMirror sup.note-ref:hover) {
+    color: #ccc;
   }
 }
 </style>
