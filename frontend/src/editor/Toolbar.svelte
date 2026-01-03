@@ -17,6 +17,8 @@
     Link,
     Image,
     Table,
+    FileDown,
+    FileUp,
   } from "lucide-svelte";
   import {
     toggleBold,
@@ -30,6 +32,8 @@
     insertLink,
     insertImage,
     insertTable,
+    pasteFromMarkdown,
+    copyAsMarkdown,
     undoCommand,
     redoCommand,
     canUndo,
@@ -283,6 +287,28 @@
         </button>
       {/if}
     </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <!-- Markdown operations -->
+      <button
+        class="toolbar-button"
+        onclick={() => handleCommand(pasteFromMarkdown)}
+        title="Paste Markdown and convert to document (Ctrl+Shift+V)"
+      >
+        <FileDown size={16} />
+        <span class="toolbar-button-label">Paste MD</span>
+      </button>
+      <button
+        class="toolbar-button"
+        onclick={() => handleCommand(copyAsMarkdown)}
+        title="Copy document as Markdown (Ctrl+Shift+C)"
+      >
+        <FileUp size={16} />
+        <span class="toolbar-button-label">Copy MD</span>
+      </button>
+    </div>
   </div>
 {/if}
 
@@ -322,6 +348,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 4px;
     min-width: 28px;
     height: 28px;
     padding: 4px 8px;
@@ -366,6 +393,12 @@
   .toolbar-button :global(svg) {
     stroke: currentColor;
     fill: none;
+  }
+
+  .toolbar-button-label {
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
   }
 
   @media (prefers-color-scheme: dark) {

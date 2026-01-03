@@ -292,7 +292,7 @@ function parseTable(tokens: any[], start: number, schema: Schema): ProseMirrorNo
         const cellToken = tokens[j];
         
         if (cellToken.type === "th_open" || cellToken.type === "td_open") {
-          // Parse table cell (header or data)
+          // Parse table cell (treat all cells as regular cells, not headers)
           const isHeader = cellToken.type === "th_open";
           const closeType = isHeader ? "th_close" : "td_close";
           
@@ -303,9 +303,8 @@ function parseTable(tokens: any[], start: number, schema: Schema): ProseMirrorNo
           // Table cells must contain block nodes, so wrap inline content in a paragraph
           const paragraph = schema.nodes.paragraph.create({}, inlineContent);
           
-          const cellNode = isHeader
-            ? schema.nodes.table_header.create({}, Fragment.fromArray([paragraph]))
-            : schema.nodes.table_cell.create({}, Fragment.fromArray([paragraph]));
+          // Always use table_cell instead of table_header to avoid grey background
+          const cellNode = schema.nodes.table_cell.create({}, Fragment.fromArray([paragraph]));
           cells.push(cellNode);
           
           j = findClosingToken(tokens, j, closeType) + 1;

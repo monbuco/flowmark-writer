@@ -3,7 +3,7 @@ import { EditorView } from "prosemirror-view";
 import { toggleMark, setBlockType, lift } from "prosemirror-commands";
 import { undo, redo } from "prosemirror-history";
 import { wrapInList } from "prosemirror-schema-list";
-import { Fragment } from "prosemirror-model";
+import { Fragment, Node as ProseMirrorNode } from "prosemirror-model";
 import {
   addRowBefore,
   addRowAfter,
@@ -492,5 +492,63 @@ export function canUndo(state: EditorState): boolean {
 // Check if redo is available
 export function canRedo(state: EditorState): boolean {
   return redo(state) !== false;
+}
+
+// Paste from Markdown
+export async function pasteFromMarkdown(view: EditorView): Promise<boolean> {
+  try {
+    // Read from clipboard
+    const text = await navigator.clipboard.readText();
+    if (!text) return false;
+    
+    // Import parser dynamically
+    const { parseMarkdown } = await import("./clipboard/markdownParser");
+    const { state, dispatch } = view;
+    const { from, to } = state.selection;
+    
+    // Parse Markdown to ProseMirror slice
+    const slice = parseMarkdown(text, schema);
+    if (slice) {
+      const tr = state.tr.replaceRange(from, to, slice);
+      if (dispatch) {
+        dispatch(tr);
+        view.focus();
+      }
+      return true;
+    }
+  } catch (error) {
+    console.error("Error pasting from Markdown:", error);
+  }
+  return false;
+}
+
+// Copy as Markdown
+export async function copyAsMarkdown(view: EditorView): Promise<boolean> {
+  try {
+    const { state } = view;
+    const { from, to } = state.selection;
+    
+    // Get selected content or full document
+    let content: ProseMirrorNode | Fragment;
+    if (from === to) {
+      // No selection - copy entire document
+      content = state.doc;
+    } else {
+      // Copy selected content
+      const slice = state.doc.slice(from, to);
+      content = slice.content;
+    }
+    
+    // Import serializer dynamically
+    const { serializeToMarkdown } = await import("./clipboard/markdownSerializer");
+    const markdown = serializeToMarkdown(content, schema);
+    
+    // Copy to clipboard
+    await navigator.clipboard.writeText(markdown.trim());
+    return true;
+  } catch (error) {
+    console.error("Error copying as Markdown:", error);
+  }
+  return false;
 }
 

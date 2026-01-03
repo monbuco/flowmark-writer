@@ -11,7 +11,6 @@
   
     import { schema } from "./schema";
     import { buildInputRules } from "./inputRules";
-    import { parseMarkdown } from "./clipboard/markdownParser";
     import Toolbar from "./Toolbar.svelte";
     import LinkEditor from "./LinkEditor.svelte";
     import TableMenu from "./TableMenu.svelte";
@@ -46,6 +45,25 @@
           "Mod-z": undo,
           "Mod-y": redo,
           "Shift-Mod-z": redo,
+          // Markdown operations
+          "Shift-Mod-v": (state: EditorState, dispatch: any) => {
+            if (!view) return false;
+            // Handle async command - schedule it
+            (async () => {
+              const { pasteFromMarkdown } = await import("./toolbar");
+              await pasteFromMarkdown(view);
+            })();
+            return true; // Prevent default paste
+          },
+          "Shift-Mod-c": (state: EditorState, dispatch: any) => {
+            if (!view) return false;
+            // Handle async command - schedule it
+            (async () => {
+              const { copyAsMarkdown } = await import("./toolbar");
+              await copyAsMarkdown(view);
+            })();
+            return true; // Prevent default copy
+          },
           // Handle Enter key
           "Enter": (state: EditorState, dispatch: any) => {
             const { $from } = state.selection;
@@ -327,43 +345,9 @@
               return false;
             },
             paste: (view, event) => {
-              // IMPORTANT: Separation of concerns for performance
-              // - Input rules: Only for direct typing (handled by inputRules plugin)
-              // - Markdown parser: Only for paste operations (handled here)
-              // We prevent default paste behavior and manually insert parsed content
-              // to ensure input rules are NOT triggered during paste operations.
-              
-              const clipboardData = event.clipboardData;
-              if (!clipboardData) return false;
-
-              const text = clipboardData.getData('text/plain');
-              if (!text) return false;
-
-              // Check if the text looks like Markdown
-              const looksLikeMarkdown = /^[#*\-`\[\]>\d]/.test(text.trim()) || 
-                                       /\*\*.*\*\*|`.*`|\[.*\]\(.*\)/.test(text);
-
-              if (looksLikeMarkdown) {
-                // Prevent default paste behavior to bypass input rules
-                event.preventDefault();
-                
-                // Use the Markdown parser (NOT input rules) to convert markdown to ProseMirror nodes
-                const slice = parseMarkdown(text, schema);
-                if (slice) {
-                  const { state, dispatch } = view;
-                  const { from, to } = state.selection;
-                  
-                  // Directly insert the parsed slice using a manual transaction
-                  // This bypasses input rules because input rules only trigger on actual text input events,
-                  // not on programmatic transactions created via tr.replaceRange()
-                  const tr = state.tr.replaceRange(from, to, slice);
-                  dispatch(tr);
-                  return true; // Indicate we handled the paste
-                }
-              }
-
-              // For non-markdown content, let default paste behavior handle it
-              // This will insert plain text, which may trigger input rules for direct typing patterns
+              // Plain paste - no Markdown parsing
+              // Markdown parsing is now explicit via "Paste MD" action
+              // Let ProseMirror handle default paste behavior
               return false;
             },
           },
