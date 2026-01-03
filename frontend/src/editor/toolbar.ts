@@ -1,0 +1,379 @@
+import { EditorState } from "prosemirror-state";
+import { EditorView } from "prosemirror-view";
+import { toggleMark, setBlockType, lift } from "prosemirror-commands";
+import { undo, redo } from "prosemirror-history";
+import { wrapInList } from "prosemirror-schema-list";
+import {
+  addRowBefore,
+  addRowAfter,
+  deleteRow,
+  addColumnBefore,
+  addColumnAfter,
+  deleteColumn,
+} from "prosemirror-tables";
+import { schema } from "./schema";
+
+// Text formatting commands
+export function toggleBold(view: EditorView) {
+  const { state, dispatch } = view;
+  return toggleMark(schema.marks.strong)(state, dispatch);
+}
+
+export function toggleItalic(view: EditorView) {
+  const { state, dispatch } = view;
+  return toggleMark(schema.marks.em)(state, dispatch);
+}
+
+export function toggleCode(view: EditorView) {
+  const { state, dispatch } = view;
+  return toggleMark(schema.marks.code)(state, dispatch);
+}
+
+// Block structure commands
+export function setParagraph(view: EditorView) {
+  const { state, dispatch } = view;
+  return setBlockType(schema.nodes.paragraph)(state, dispatch);
+}
+
+export function setHeading(view: EditorView, level: number) {
+  const { state, dispatch } = view;
+  return setBlockType(schema.nodes.heading, { level })(state, dispatch);
+}
+
+// List commands - toggle if already in list, otherwise wrap
+export function toggleBulletList(view: EditorView) {
+  const { state, dispatch } = view;
+  const { $from } = state.selection;
+  
+  // Check if we're already in a bullet list
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type === schema.nodes.bullet_list) {
+      // Lift out of list
+      return lift(state, dispatch);
+    }
+  }
+  
+  // Wrap in list
+  return wrapInList(schema.nodes.bullet_list)(state, dispatch);
+}
+
+export function toggleOrderedList(view: EditorView) {
+  const { state, dispatch } = view;
+  const { $from } = state.selection;
+  
+  // Check if we're already in an ordered list
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type === schema.nodes.ordered_list) {
+      // Lift out of list
+      return lift(state, dispatch);
+    }
+  }
+  
+  // Wrap in list
+  return wrapInList(schema.nodes.ordered_list)(state, dispatch);
+}
+
+// Link command - improved to handle editing existing links
+export function insertLink(view: EditorView) {
+  const { state, dispatch } = view;
+  
+  // Check if link mark exists
+  if (!schema.marks.link) {
+    console.warn("Link mark not available in schema");
+    return false;
+  }
+
+  const { from, to } = state.selection;
+  const { $from } = state.selection;
+  
+  // Check if we're already in a link
+  const linkMark = schema.marks.link;
+  const existingLink = linkMark.isInSet($from.marks());
+  
+  let url = "";
+  if (existingLink) {
+    // Editing existing link - get current URL
+    url = existingLink.attrs.href || "";
+  }
+  
+  // Get selected text
+  const selectedText = state.doc.textBetween(from, to, " ");
+  
+  // Prompt for URL (pre-fill if editing)
+  const newUrl = prompt(
+    existingLink ? `Edit link URL:\nCurrent: ${url}` : "Enter URL:",
+    url || "https://"
+  );
+  
+  if (!newUrl || newUrl.trim() === "") {
+    // If empty URL and we have a link, remove it
+    if (existingLink && from !== to) {
+      const tr = state.tr.removeMark(from, to, linkMark);
+      if (dispatch) dispatch(tr);
+      return true;
+    }
+    return false;
+  }
+
+  // If no text is selected and we're not editing, insert link text
+  if (from === to && !existingLink) {
+    const linkText = prompt("Enter link text:", "link");
+    if (!linkText) return false;
+    
+    const tr = state.tr
+      .insertText(linkText, from)
+      .addMark(from, from + linkText.length, linkMark.create({ href: newUrl }));
+    if (dispatch) dispatch(tr);
+    return true;
+  }
+
+  // Apply or update link mark
+  const mark = linkMark.create({ href: newUrl });
+  const tr = state.tr.addMark(from, to, mark);
+  
+  if (dispatch) {
+    dispatch(tr);
+  }
+  return true;
+}
+
+// Image command
+export function insertImage(view: EditorView) {
+  const { state, dispatch } = view;
+  const url = prompt("Enter image URL:");
+  if (!url) return false;
+
+  // Check if image node exists in schema
+  if (!schema.nodes.image) {
+    console.warn("Image node not available in schema");
+    return false;
+  }
+
+  const { from } = state.selection;
+  const image = schema.nodes.image.create({ src: url, alt: "" });
+  const tr = state.tr.replaceSelectionWith(image);
+  
+  if (dispatch) {
+    dispatch(tr);
+  }
+  return true;
+}
+
+// Table command - prompt for rows and columns
+export function insertTable(view: EditorView) {
+  const { state, dispatch } = view;
+  
+  // Check if table nodes exist in schema
+  if (!schema.nodes.table || !schema.nodes.table_row || !schema.nodes.table_cell) {
+    console.warn("Table nodes not available in schema");
+    return false;
+  }
+
+  // Prompt for rows and columns
+  const rowsInput = prompt("Number of rows:", "3");
+  const colsInput = prompt("Number of columns:", "3");
+  
+  if (!rowsInput || !colsInput) return false;
+  
+  const rows = parseInt(rowsInput, 10);
+  const cols = parseInt(colsInput, 10);
+  
+  if (isNaN(rows) || isNaN(cols) || rows < 1 || cols < 1 || rows > 20 || cols > 20) {
+    alert("Please enter valid numbers between 1 and 20");
+    return false;
+  }
+
+  const { from } = state.selection;
+
+  // Create table structure
+  const cells: any[] = [];
+  for (let i = 0; i < rows; i++) {
+    const rowCells: any[] = [];
+    for (let j = 0; j < cols; j++) {
+      const cell = schema.nodes.table_cell.create(
+        {},
+        schema.nodes.paragraph.create()
+      );
+      rowCells.push(cell);
+    }
+    const row = schema.nodes.table_row.create(null, rowCells);
+    cells.push(row);
+  }
+
+  const table = schema.nodes.table.create(null, cells);
+  const tr = state.tr.replaceSelectionWith(table);
+  
+  // Ensure there's a paragraph after the table for navigation
+  const tableStart = tr.selection.from;
+  const tableNode = tr.doc.nodeAt(tableStart);
+  if (tableNode) {
+    const tableEnd = tableStart + tableNode.nodeSize;
+    const nextNode = tr.doc.nodeAt(tableEnd);
+    if (!nextNode || nextNode.type !== schema.nodes.paragraph) {
+      // Insert a paragraph after the table
+      const paragraph = schema.nodes.paragraph.create();
+      tr.insert(tableEnd, paragraph);
+    }
+  }
+  
+  if (dispatch) {
+    dispatch(tr);
+  }
+  return true;
+}
+
+// Table editing commands
+export function addRowBeforeCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  return addRowBefore(state, dispatch);
+}
+
+export function addRowAfterCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  return addRowAfter(state, dispatch);
+}
+
+export function deleteRowCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  return deleteRow(state, dispatch);
+}
+
+export function addColumnBeforeCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  return addColumnBefore(state, dispatch);
+}
+
+export function addColumnAfterCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  return addColumnAfter(state, dispatch);
+}
+
+export function deleteColumnCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  return deleteColumn(state, dispatch);
+}
+
+// Check if cursor is in a table
+export function isInTable(state: EditorState): boolean {
+  const { $from } = state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type === schema.nodes.table) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Delete table command
+export function deleteTableCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  const { $from } = state.selection;
+  
+  // Find the table node
+  let tablePos = -1;
+  let tableNode = null;
+  
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type === schema.nodes.table) {
+      tablePos = $from.before(d);
+      tableNode = node;
+      break;
+    }
+  }
+  
+  if (!tableNode || tablePos === -1) {
+    return false;
+  }
+  
+  // Replace table with a paragraph
+  const paragraph = schema.nodes.paragraph.create();
+  const tr = state.tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, paragraph);
+  
+  // Set cursor at the start of the new paragraph
+  tr.setSelection(state.selection.constructor.near(tr.doc.resolve(tablePos + 1)));
+  
+  if (dispatch) {
+    dispatch(tr);
+  }
+  return true;
+}
+
+// Check if mark is active
+export function isMarkActive(state: EditorState, markType: any): boolean {
+  const { from, $from, to, empty } = state.selection;
+  if (empty) {
+    return !!markType.isInSet(state.storedMarks || $from.marks());
+  }
+  return state.doc.rangeHasMark(from, to, markType);
+}
+
+// Check if block type is active
+export function isBlockActive(state: EditorState, nodeType: any, attrs: Record<string, any> = {}): boolean {
+  const { $from } = state.selection;
+  let depth = $from.depth;
+  while (depth > 0) {
+    const node = $from.node(depth);
+    if (node.type === nodeType) {
+      for (const key in attrs) {
+        if (node.attrs[key] !== attrs[key]) {
+          return false;
+        }
+      }
+      return true;
+    }
+    depth--;
+  }
+  return false;
+}
+
+// Check if list is active
+export function isListActive(state: EditorState, listType: any): boolean {
+  const { $from } = state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type === listType) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Get link URL if link is active
+export function getLinkUrl(state: EditorState): string | null {
+  const { $from } = state.selection;
+  const linkMark = schema.marks.link;
+  if (!linkMark) return null;
+  
+  const link = linkMark.isInSet($from.marks());
+  if (link) {
+    return link.attrs.href || null;
+  }
+  return null;
+}
+
+// Undo command
+export function undoCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  return undo(state, dispatch);
+}
+
+// Redo command
+export function redoCommand(view: EditorView) {
+  const { state, dispatch } = view;
+  return redo(state, dispatch);
+}
+
+// Check if undo is available
+export function canUndo(state: EditorState): boolean {
+  return undo(state) !== false;
+}
+
+// Check if redo is available
+export function canRedo(state: EditorState): boolean {
+  return redo(state) !== false;
+}
+

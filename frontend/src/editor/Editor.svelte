@@ -3,11 +3,16 @@
     import { EditorState } from "prosemirror-state";
     import { EditorView } from "prosemirror-view";
     import { keymap } from "prosemirror-keymap";
-    import { baseKeymap } from "prosemirror-commands";
-    import { history } from "prosemirror-history";
+    import { baseKeymap, toggleMark } from "prosemirror-commands";
+    import { history, undo, redo } from "prosemirror-history";
+    import { columnResizing, tableEditing } from "prosemirror-tables";
+    import { TextSelection } from "prosemirror-state";
   
     import { schema } from "./schema";
     import { buildInputRules } from "./inputRules";
+    import Toolbar from "./Toolbar.svelte";
+    import LinkEditor from "./LinkEditor.svelte";
+    import TableMenu from "./TableMenu.svelte";
   
     let editorEl: HTMLDivElement;
     let view: EditorView | null = null;
@@ -25,18 +30,128 @@
           schema.nodes.paragraph.create()
         );
         
+        // Custom keyboard shortcuts for bold, italic, undo, and redo
+        const customKeymap = {
+          "Mod-b": toggleMark(schema.marks.strong),
+          "Mod-i": toggleMark(schema.marks.em),
+          "Mod-z": undo,
+          "Mod-y": redo,
+          "Shift-Mod-z": redo,
+          // Handle Enter at the end of a table to create a new paragraph
+          "Enter": (state: EditorState, dispatch: any) => {
+            const { $from } = state.selection;
+            // Find table node
+            let tablePos = -1;
+            let tableNode = null;
+            for (let d = $from.depth; d > 0; d--) {
+              const node = $from.node(d);
+              if (node.type === schema.nodes.table) {
+                tablePos = $from.before(d);
+                tableNode = node;
+                break;
+              }
+            }
+            
+            if (tableNode && tablePos >= 0) {
+              const tableEnd = tablePos + tableNode.nodeSize;
+              // Check if cursor is near the end of the table
+              if ($from.pos >= tableEnd - 5) {
+                // Check if there's already a paragraph after the table
+                const nextNode = state.doc.nodeAt(tableEnd);
+                if (!nextNode || nextNode.type !== schema.nodes.paragraph) {
+                  // Create a new paragraph after the table
+                  const paragraph = schema.nodes.paragraph.create();
+                  const tr = state.tr.insert(tableEnd, paragraph);
+                  tr.setSelection(TextSelection.near(tr.doc.resolve(tableEnd + 1)));
+                  if (dispatch) dispatch(tr);
+                  return true;
+                } else {
+                  // Move to the existing paragraph
+                  const tr = state.tr.setSelection(TextSelection.near(state.doc.resolve(tableEnd + 1)));
+                  if (dispatch) dispatch(tr);
+                  return true;
+                }
+              }
+            }
+            return false; // Let default behavior handle it
+          },
+          // Handle ArrowDown at the end of a table
+          "ArrowDown": (state: EditorState, dispatch: any) => {
+            const { $from } = state.selection;
+            // Find table node
+            let tablePos = -1;
+            let tableNode = null;
+            for (let d = $from.depth; d > 0; d--) {
+              const node = $from.node(d);
+              if (node.type === schema.nodes.table) {
+                tablePos = $from.before(d);
+                tableNode = node;
+                break;
+              }
+            }
+            
+            if (tableNode && tablePos >= 0) {
+              const tableEnd = tablePos + tableNode.nodeSize;
+              // Check if cursor is near the end of the table
+              if ($from.pos >= tableEnd - 5) {
+                // Check if there's a paragraph after the table
+                const nextNode = state.doc.nodeAt(tableEnd);
+                if (nextNode && nextNode.type === schema.nodes.paragraph) {
+                  // Move to the paragraph after the table
+                  const tr = state.tr.setSelection(TextSelection.near(state.doc.resolve(tableEnd + 1)));
+                  if (dispatch) dispatch(tr);
+                  return true;
+                } else {
+                  // Create a new paragraph after the table
+                  const paragraph = schema.nodes.paragraph.create();
+                  const tr = state.tr.insert(tableEnd, paragraph);
+                  tr.setSelection(TextSelection.near(tr.doc.resolve(tableEnd + 1)));
+                  if (dispatch) dispatch(tr);
+                  return true;
+                }
+              }
+            }
+            return false; // Let default behavior handle it
+          },
+        };
+
         const state = EditorState.create({
           doc,
           schema,
           plugins: [
             buildInputRules(schema),
+            keymap(customKeymap),
             keymap(baseKeymap),
             history(),
+            columnResizing(),
+            tableEditing(),
           ],
         });
   
         view = new EditorView(editorEl, {
           state,
+          handleDOMEvents: {
+            click: (view, event) => {
+              // Prevent default link navigation - allow editing instead
+              const target = event.target as HTMLElement;
+              if (target.tagName === 'A') {
+                event.preventDefault();
+                // Focus the editor to allow editing
+                view.focus();
+                return true;
+              }
+              return false;
+            },
+            mousemove: (view, event) => {
+              // Update state on mouse move to detect link hover
+              const target = event.target as HTMLElement;
+              if (target.tagName === 'A') {
+                // Trigger state update to show link editor
+                return false;
+              }
+              return false;
+            },
+          },
         });
 
         // Ensure the editor container is visible
@@ -72,7 +187,13 @@
   
   <div class="editor-wrapper">
     <div class="editor">
-      <div bind:this={editorEl} class="editor-container"></div>
+      <Toolbar {view} />
+      <div bind:this={editorEl} class="editor-container">
+        {#if view}
+          <LinkEditor {view} />
+          <TableMenu {view} />
+        {/if}
+      </div>
     </div>
   </div>
   
@@ -165,6 +286,45 @@
 
 :global(.editor-container .ProseMirror li) {
   margin: 0.25em 0;
+}
+
+:global(.editor-container .ProseMirror hr) {
+  border: none;
+  border-top: 2px solid rgba(0, 0, 0, 0.1);
+  margin: 2em 0;
+}
+
+:global(.editor-container .ProseMirror a) {
+  color: #0066cc;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+:global(.editor-container .ProseMirror a:hover) {
+  color: #0052a3;
+  text-decoration: underline;
+}
+
+:global(.editor-container .ProseMirror table) {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+}
+
+:global(.editor-container .ProseMirror table td),
+:global(.editor-container .ProseMirror table th) {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 8px 12px;
+  min-width: 100px;
+}
+
+:global(.editor-container .ProseMirror table th) {
+  background-color: rgba(0, 0, 0, 0.05);
+  font-weight: 600;
+}
+
+:global(.editor-container .ProseMirror table .selectedCell) {
+  background-color: rgba(0, 102, 204, 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
