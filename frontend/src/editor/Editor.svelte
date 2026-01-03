@@ -7,6 +7,7 @@
     import { history, undo, redo } from "prosemirror-history";
     import { columnResizing, tableEditing } from "prosemirror-tables";
     import { TextSelection } from "prosemirror-state";
+    import { Fragment } from "prosemirror-model";
   
     import { schema } from "./schema";
     import { buildInputRules } from "./inputRules";
@@ -37,9 +38,42 @@
           "Mod-z": undo,
           "Mod-y": redo,
           "Shift-Mod-z": redo,
-          // Handle Enter at the end of a table to create a new paragraph
+          // Handle Enter key
           "Enter": (state: EditorState, dispatch: any) => {
             const { $from } = state.selection;
+            
+            // Check if current line is "---" and convert to horizontal rule
+            const lineStart = $from.start($from.depth);
+            const lineEnd = $from.end($from.depth);
+            const lineText = state.doc.textBetween(lineStart, lineEnd).trim();
+            
+            if (lineText === "---" && schema.nodes.horizontal_rule) {
+              // Find the paragraph node that contains "---"
+              const paragraphNode = $from.node($from.depth);
+              if (paragraphNode.type === schema.nodes.paragraph) {
+                const hr = schema.nodes.horizontal_rule.create();
+                const newParagraph = schema.nodes.paragraph.create();
+                // Replace the entire paragraph node with horizontal rule and new paragraph
+                // We need to replace from before the paragraph to after it
+                const paragraphStart = $from.before($from.depth);
+                const paragraphEnd = $from.after($from.depth);
+                // Create fragment with horizontal rule and new paragraph
+                const fragment = Fragment.fromArray([hr, newParagraph]);
+                const tr = state.tr.replaceWith(paragraphStart, paragraphEnd, fragment);
+                // Position cursor at the start of the new paragraph
+                const updatedDoc = tr.doc;
+                // Find where the horizontal rule ends
+                const hrNode = updatedDoc.nodeAt(paragraphStart);
+                if (hrNode && hrNode.type === schema.nodes.horizontal_rule) {
+                  const hrEnd = paragraphStart + hrNode.nodeSize;
+                  const cursorPos = hrEnd + 1;
+                  tr.setSelection(TextSelection.near(updatedDoc.resolve(cursorPos)));
+                }
+                if (dispatch) dispatch(tr);
+                return true;
+              }
+            }
+            
             // Find table node
             let tablePos = -1;
             let tableNode = null;

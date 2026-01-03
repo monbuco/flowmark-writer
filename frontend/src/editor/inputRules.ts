@@ -4,7 +4,6 @@ import {
   textblockTypeInputRule,
   smartQuotes,
   ellipsis,
-  emDash,
 } from "prosemirror-inputrules";
 import { Schema } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
@@ -40,18 +39,11 @@ export function buildInputRules(schema: Schema) {
     );
   }
 
-  // Horizontal rule: ---
-  if (schema.nodes.horizontal_rule) {
-    rules.push(
-      new InputRule(/^---$/, (state: EditorState, match: RegExpMatchArray, start: number, end: number) => {
-        const { tr } = state;
-        const hr = schema.nodes.horizontal_rule.create();
-        return tr.replaceWith(start, end, hr);
-      })
-    );
-  }
+  // Horizontal rule is now handled by Enter key handler in Editor.svelte
+  // (Removed input rule to allow typing --- without space, then pressing Enter)
 
-  rules.push(...smartQuotes, ellipsis, emDash);
+  // Add other rules (emDash removed to allow --- for horizontal rule)
+  rules.push(...smartQuotes, ellipsis);
 
   return inputRules({ rules });
 }
